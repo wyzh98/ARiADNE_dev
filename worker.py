@@ -101,13 +101,8 @@ class Worker:
     def select_node(self, observations):
         node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
         with torch.no_grad():
-            logp_list = self.local_policy_net(node_inputs, edge_inputs, current_index, node_padding_mask,
-                                              edge_padding_mask, edge_mask)
-
-        if self.greedy:
-            action_index = torch.argmax(logp_list, dim=1).long()
-        else:
-            action_index = torch.multinomial(logp_list.exp(), 1).long().squeeze(1)
+            action_index, logp, entropy = self.local_policy_net(node_inputs, edge_inputs, current_index, node_padding_mask,
+                                                                edge_padding_mask, edge_mask, self.greedy)
 
         next_node_index = edge_inputs[0, 0, action_index.item()]
         next_position = self.env.node_coords[next_node_index]
@@ -161,7 +156,7 @@ class Worker:
                 self.env.plot_env(self.global_step, gifs_path, i, self.travel_dist)
 
             if done:
-                reward = copy.deepcopy(self.episode_buffer[9])
+                reward = copy.deepcopy(self.episode_buffer[7])
                 reward_prime = []
                 for j in range(len(reward)):
                     reward_prime.append(reward[j].item())
@@ -169,13 +164,13 @@ class Worker:
                 reward_prime = np.array(reward_prime).reshape(-1)
                 break
         if not done:
-            reward = copy.deepcopy(self.episode_buffer[9])
+            reward = copy.deepcopy(self.episode_buffer[7])
             reward_prime = []
             for j in range(len(reward)):
                 reward_prime.append(reward[j].item())
             node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
             with torch.no_grad():
-                value = self.local_critic_net(node_inputs, current_index, node_padding_mask, edge_mask)
+                value, _ = self.local_critic_net(node_inputs, current_index, node_padding_mask, edge_mask)
             reward_prime.append(value.item())
             reward_prime = np.array(reward_prime).reshape(-1)
 

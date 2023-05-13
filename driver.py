@@ -28,15 +28,13 @@ def writeToTensorBoard(writer, tensorboardData, curr_episode):
 
     tensorboardData = np.array(tensorboardData)
     tensorboardData = list(np.nanmean(tensorboardData, axis=0))
-    reward, value, policyLoss, qValueLoss, entropy, policyGradNorm, qValueGradNorm, log_alpha, alphaLoss, travel_dist, success_rate, explored_rate = tensorboardData
+    reward, value, returns, policyLoss, qValueLoss, entropy, policyGradNorm, qValueGradNorm, travel_dist, success_rate, explored_rate = tensorboardData
     metrics = {'Losses/Value': value,
                'Losses/Policy Loss': policyLoss,
-               'Losses/Alpha Loss': alphaLoss,
                'Losses/Q Value Loss': qValueLoss,
                'Losses/Entropy': entropy,
                'Losses/Policy Grad Norm': policyGradNorm,
                'Losses/Q Value Grad Norm': qValueGradNorm,
-               'Losses/Log Alpha': log_alpha,
                'Perf/Reward': reward,
                'Perf/Travel Distance': travel_dist,
                'Perf/Explored Rate': explored_rate,
@@ -181,29 +179,29 @@ def main():
 
                 # PPO
                 with torch.no_grad():
-                    logp_old = old_policy_net(node_inputs_batch,
-                                              edge_inputs_batch,
-                                              current_inputs_batch,
-                                              node_padding_mask_batch,
-                                              edge_padding_mask_batch,
-                                              edge_mask_batch)
-                    value_prime = dp_critic(next_node_inputs_batch,
-                                            next_current_inputs_batch,
-                                            next_node_padding_mask_batch,
-                                            next_edge_mask_batch)
-                    value = dp_critic(node_inputs_batch,
-                                      current_inputs_batch,
-                                      node_padding_mask_batch,
-                                      edge_mask_batch)
+                    _, logp_old, entropy = old_policy_net(node_inputs_batch,
+                                                          edge_inputs_batch,
+                                                          current_inputs_batch,
+                                                          node_padding_mask_batch,
+                                                          edge_padding_mask_batch,
+                                                          edge_mask_batch)
+                    value_prime, _ = dp_critic(next_node_inputs_batch,
+                                               next_current_inputs_batch,
+                                               next_node_padding_mask_batch,
+                                               next_edge_mask_batch)
+                    value, _ = dp_critic(node_inputs_batch,
+                                         current_inputs_batch,
+                                         node_padding_mask_batch,
+                                         edge_mask_batch)
                     advantage = reward_batch + GAMMA * (1 - done_batch) * value_prime - value
 
                 for i in range(8):
-                    logp = dp_policy(node_inputs_batch,
-                                     edge_inputs_batch,
-                                     current_inputs_batch,
-                                     node_padding_mask_batch,
-                                     edge_padding_mask_batch,
-                                     edge_mask_batch)
+                    _, logp, _ = dp_policy(node_inputs_batch,
+                                           edge_inputs_batch,
+                                           current_inputs_batch,
+                                           node_padding_mask_batch,
+                                           edge_padding_mask_batch,
+                                           edge_mask_batch)
                     ratio = torch.exp(logp - logp_old.detach())
                     surr1 = ratio * advantage.detach()
                     surr2 = ratio.clamp(1-0.2, 1+0.2) * advantage.detach()
@@ -214,10 +212,10 @@ def main():
                     policy_grad_norm = torch.nn.utils.clip_grad_norm_(global_policy_net.parameters(), max_norm=1000)
                     global_policy_optimizer.step()
 
-                    predicted_value = dp_critic(node_inputs_batch,
-                                                current_inputs_batch,
-                                                node_padding_mask_batch,
-                                                edge_mask_batch)
+                    predicted_value, _ = dp_critic(node_inputs_batch,
+                                                   current_inputs_batch,
+                                                   node_padding_mask_batch,
+                                                   edge_mask_batch)
                     mse_loss = nn.MSELoss()
                     value_loss = mse_loss(predicted_value.squeeze(1).mean(), target_v_batch.detach().mean())
                     global_critic_optimizer.zero_grad()
@@ -229,8 +227,8 @@ def main():
                 perf_data = []
                 for n in metric_name:
                     perf_data.append(np.nanmean(perf_metrics[n]))
-                data = [reward_batch.mean().item(), predicted_value.mean().item(), target_v_batch.item(), policy_loss.item(),
-                        value_loss.mean().item(), policy_grad_norm.item(), value_grad_norm.item(), *perf_data]
+                data = [reward_batch.mean().item(), predicted_value.mean().item(), target_v_batch.mean().item(), policy_loss.item(),
+                        value_loss.mean().item(), entropy.item(), policy_grad_norm.item(), value_grad_norm.item(), *perf_data]
                 training_data.append(data)
 
             # write record to tensorboard

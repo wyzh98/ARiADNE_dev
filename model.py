@@ -219,7 +219,7 @@ class PolicyNet(nn.Module):
 
         return enhanced_node_feature
 
-    def output_policy(self, enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask):
+    def output_policy(self, enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask, greedy=False):
         current_edge = edge_inputs.permute(0, 2, 1)
         embedding_dim = enhanced_node_feature.size()[2]
 
@@ -239,13 +239,19 @@ class PolicyNet(nn.Module):
         enhanced_current_node_feature, _ = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
         enhanced_current_node_feature = self.current_embedding(torch.cat((enhanced_current_node_feature, current_node_feature), dim=-1))
         logp = self.pointer(enhanced_current_node_feature, neigboring_feature, current_mask)
-        logp= logp.squeeze(1) # batch_size*k_size
+        logp = logp.squeeze(1) # batch_size*k_size
+        entropy = (logp * logp.exp()).sum(-1).mean()
+        if not greedy:
+            action = torch.multinomial(logp.exp(), 1).long()
+        else:
+            action = torch.argmax(logp, dim=1).long()
+        logp = torch.gather(logp, 1, action)
 
-        return logp
+        return action, logp, entropy
 
-    def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None):
+    def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None, greedy=False):
         enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-        logp = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask)
+        logp = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask, greedy)
         return logp
 
 

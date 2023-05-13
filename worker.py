@@ -1,5 +1,6 @@
 import copy
 import os
+import scipy.signal as signal
 
 import imageio
 import numpy as np
@@ -8,8 +9,12 @@ from env import Env
 from parameter import *
 
 
+def discount(x, gamma):
+    return signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
+
+
 class Worker:
-    def __init__(self, meta_agent_id, policy_net, q_net, global_step, device='cuda', greedy=False, save_image=False):
+    def __init__(self, meta_agent_id, policy_net, critic_net, global_step, device='cuda', greedy=False, save_image=False):
         self.device = device
         self.greedy = greedy
         self.metaAgentID = meta_agent_id
@@ -20,7 +25,7 @@ class Worker:
 
         self.env = Env(map_index=self.global_step, k_size=self.k_size, plot=save_image)
         self.local_policy_net = policy_net
-        self.local_q_net = q_net
+        self.local_critic_net = critic_net
 
         self.current_node_index = 0
         self.travel_dist = 0
@@ -28,7 +33,7 @@ class Worker:
 
         self.episode_buffer = []
         self.perf_metrics = dict()
-        for i in range(15):
+        for i in range(16):
             self.episode_buffer.append([])
 
     def get_observations(self):
@@ -156,7 +161,28 @@ class Worker:
                 self.env.plot_env(self.global_step, gifs_path, i, self.travel_dist)
 
             if done:
+                reward = copy.deepcopy(self.episode_buffer[9])
+                reward_prime = []
+                for j in range(len(reward)):
+                    reward_prime.append(reward[j].item())
+                reward_prime.append(0)
+                reward_prime = np.array(reward_prime).reshape(-1)
                 break
+        if not done:
+            reward = copy.deepcopy(self.episode_buffer[9])
+            reward_prime = []
+            for j in range(len(reward)):
+                reward_prime.append(reward[j].item())
+            node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
+            with torch.no_grad():
+                value = self.local_critic_net(node_inputs, current_index, node_padding_mask, edge_mask)
+            reward_prime.append(value.item())
+            reward_prime = np.array(reward_prime).reshape(-1)
+
+        discounted_rewards = discount(reward_prime, GAMMA)[:-1]
+        discounted_rewards = discounted_rewards.tolist()
+        for j in range(len(discounted_rewards)):
+            self.episode_buffer[15] += torch.FloatTensor([discounted_rewards[j]]).unsqueeze(0)
 
         # save metrics
         self.perf_metrics['travel_dist'] = self.travel_dist

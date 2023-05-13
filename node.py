@@ -37,7 +37,7 @@ class Node():
         # add new frontiers in the observable frontiers
         if new_frontiers != []:
             dist_list = np.linalg.norm(new_frontiers - self.coords, axis=-1)
-            new_frontiers_in_range = new_frontiers[dist_list < self.sensor_range - 10]
+            new_frontiers_in_range = new_frontiers[dist_list < self.sensor_range - 10]  # why -10?
             for point in new_frontiers_in_range:
                 collision = self.check_collision(self.coords, point, robot_belief)
                 if not collision:

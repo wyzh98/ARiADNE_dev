@@ -184,7 +184,8 @@ def main():
                                                           current_inputs_batch,
                                                           node_padding_mask_batch,
                                                           edge_padding_mask_batch,
-                                                          edge_mask_batch)
+                                                          edge_mask_batch,
+                                                          action=action_batch)
                     value_prime, _ = dp_critic(next_node_inputs_batch,
                                                next_current_inputs_batch,
                                                next_node_padding_mask_batch,
@@ -201,7 +202,8 @@ def main():
                                            current_inputs_batch,
                                            node_padding_mask_batch,
                                            edge_padding_mask_batch,
-                                           edge_mask_batch)
+                                           edge_mask_batch,
+                                           action=action_batch)
                     ratio = torch.exp(logp - logp_old.detach())
                     surr1 = ratio * advantage.detach()
                     surr2 = ratio.clamp(1-0.2, 1+0.2) * advantage.detach()

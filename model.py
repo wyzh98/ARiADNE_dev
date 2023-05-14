@@ -241,12 +241,13 @@ class PolicyNet(nn.Module):
         logp = self.pointer(enhanced_current_node_feature, neigboring_feature, current_mask)
         logp = logp.squeeze(1) # batch_size*k_size
         entropy = (logp * logp.exp()).sum(-1).mean()
-        if not greedy:
-            action = torch.multinomial(logp.exp(), 1).long()
-        else:
-            action = torch.argmax(logp, dim=1).long()
         if action is not None:
             action = action
+        else:
+            if not greedy:
+                action = torch.multinomial(logp.exp(), 1).long()
+            else:
+                action = torch.argmax(logp, dim=1).long()
         logp = torch.gather(logp, 1, action)
 
         return action, logp, entropy

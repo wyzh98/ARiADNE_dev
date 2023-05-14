@@ -211,7 +211,7 @@ def main():
 
                     global_policy_optimizer.zero_grad()
                     policy_loss.backward()
-                    policy_grad_norm = torch.nn.utils.clip_grad_norm_(global_policy_net.parameters(), max_norm=1000)
+                    policy_grad_norm = torch.nn.utils.clip_grad_norm_(global_policy_net.parameters(), max_norm=10000)
                     global_policy_optimizer.step()
 
                     predicted_value, _ = dp_critic(node_inputs_batch,
@@ -222,7 +222,7 @@ def main():
                     value_loss = mse_loss(predicted_value.squeeze(1).mean(), target_v_batch.detach().mean())
                     global_critic_optimizer.zero_grad()
                     value_loss.backward()
-                    value_grad_norm = torch.nn.utils.clip_grad_norm_(global_critic_net.parameters(), max_norm=2000)
+                    value_grad_norm = torch.nn.utils.clip_grad_norm_(global_critic_net.parameters(), max_norm=20000)
                     global_critic_optimizer.step()
 
                 # data record to be written in tensorboard

@@ -119,7 +119,7 @@ class Worker:
         self.episode_buffer[5] += copy.deepcopy(edge_mask)
 
     def save_action(self, action_index):
-        self.episode_buffer[6] += action_index.unsqueeze(0).unsqueeze(0)
+        self.episode_buffer[6] += action_index
 
     def save_reward_done(self, reward, done):
         self.episode_buffer[7] += copy.deepcopy(torch.FloatTensor([[[reward]]]).to(self.device))

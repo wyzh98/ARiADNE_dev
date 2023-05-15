@@ -28,12 +28,13 @@ def writeToTensorBoard(writer, tensorboardData, curr_episode):
 
     tensorboardData = np.array(tensorboardData)
     tensorboardData = list(np.nanmean(tensorboardData, axis=0))
-    reward, value, returns, policyLoss, qValueLoss, entropy, gradNorm, travel_dist, success_rate, explored_rate = tensorboardData
+    reward, value, returns, policyLoss, qValueLoss, entropy, gradNorm, clipFrac, travel_dist, success_rate, explored_rate = tensorboardData
     metrics = {'Losses/Value': value,
                'Losses/Policy Loss': policyLoss,
                'Losses/Q Value Loss': qValueLoss,
                'Losses/Entropy': entropy,
                'Losses/Grad Norm': gradNorm,
+               'Losses/Clip Frac': clipFrac,
                'Perf/Reward': reward,
                'Perf/Travel Distance': travel_dist,
                'Perf/Explored Rate': explored_rate,
@@ -173,19 +174,22 @@ def main():
                     value_loss = nn.MSELoss()(value, return_batch.detach()).mean()
                     entropy = -(new_logp * new_logp.exp()).sum(dim=-1).mean()
 
-                    total_loss = policy_loss + 0.5 * value_loss - 0.0 * entropy
+                    total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
 
                     global_optimizer.zero_grad()
                     total_loss.backward()
-                    grad_norm = torch.nn.utils.clip_grad_norm_(global_net.parameters(), max_norm=1000, norm_type=2)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(global_net.parameters(), max_norm=10, norm_type=2)
                     global_optimizer.step()
+
+                with torch.no_grad():
+                    clip_frac = ((ratio - 1).abs() > 0.2).float().mean()
 
                 # data record to be written in tensorboard
                 perf_data = []
                 for n in metric_name:
                     perf_data.append(np.nanmean(perf_metrics[n]))
                 data = [reward_batch.mean().item(), value_batch.mean().item(), return_batch.mean().item(), policy_loss.item(),
-                        value_loss.mean().item(), entropy.item(), grad_norm.item(), *perf_data]
+                        value_loss.mean().item(), -entropy.item(), grad_norm.item(), clip_frac.item(), *perf_data]
                 training_data.append(data)
 
             # write record to tensorboard

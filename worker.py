@@ -32,7 +32,7 @@ class Worker:
 
         self.episode_buffer = []
         self.perf_metrics = dict()
-        for i in range(16):
+        for i in range(13):
             self.episode_buffer.append([])
 
     def get_observations(self):
@@ -100,13 +100,17 @@ class Worker:
     def select_node(self, observations):
         node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
         with torch.no_grad():
-            action_index, *_ = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask,
-                                              edge_padding_mask, edge_mask, self.greedy)
+            logp_list, value = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
+        if not self.greedy:
+            action_index = torch.multinomial(logp_list.exp(), 1).long()
+        else:
+            action_index = torch.argmax(logp_list, dim=1).long()
 
         next_node_index = edge_inputs[0, 0, action_index.item()]
         next_position = self.env.node_coords[next_node_index]
+        logp = torch.gather(logp_list, 1, action_index)
 
-        return next_position, action_index
+        return next_position, action_index, logp, value
 
     def save_observations(self, observations):
         node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
@@ -117,21 +121,14 @@ class Worker:
         self.episode_buffer[4] += copy.deepcopy(edge_padding_mask)
         self.episode_buffer[5] += copy.deepcopy(edge_mask)
 
-    def save_action(self, action_index):
+    def save_action_value(self, action_index, logp, value):
         self.episode_buffer[6] += action_index
+        self.episode_buffer[7] += logp.unsqueeze(0)
+        self.episode_buffer[8] += value
 
     def save_reward_done(self, reward, done):
-        self.episode_buffer[7] += copy.deepcopy(torch.FloatTensor([[[reward]]]).to(self.device))
-        self.episode_buffer[8] += copy.deepcopy(torch.tensor([[[(int(done))]]]).to(self.device))
-
-    def save_next_observations(self, observations):
-        node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
-        self.episode_buffer[9] += copy.deepcopy(node_inputs)
-        self.episode_buffer[10] += copy.deepcopy(edge_inputs)
-        self.episode_buffer[11] += copy.deepcopy(current_index)
-        self.episode_buffer[12] += copy.deepcopy(node_padding_mask)
-        self.episode_buffer[13] += copy.deepcopy(edge_padding_mask)
-        self.episode_buffer[14] += copy.deepcopy(edge_mask)
+        self.episode_buffer[9] += copy.deepcopy(torch.FloatTensor([[[reward]]]).to(self.device))
+        self.episode_buffer[10] += copy.deepcopy(torch.tensor([[[(int(done))]]]).to(self.device))
 
     def run_episode(self, curr_episode):
         done = False
@@ -139,14 +136,13 @@ class Worker:
         observations = self.get_observations()
         for i in range(128):
             self.save_observations(observations)
-            next_position, action_index = self.select_node(observations)
+            next_position, action_index, logp, value = self.select_node(observations)
 
-            self.save_action(action_index)
+            self.save_action_value(action_index, logp, value)
             reward, done, self.robot_position, self.travel_dist = self.env.step(self.robot_position, next_position, self.travel_dist)
             self.save_reward_done(reward, done)
  
             observations = self.get_observations()
-            self.save_next_observations(observations)
 
             # save a frame
             if self.save_image:
@@ -155,29 +151,28 @@ class Worker:
                 self.env.plot_env(self.global_step, gifs_path, i, self.travel_dist)
 
             if done:
-                reward = copy.deepcopy(self.episode_buffer[7])
-                reward_prime = []
-                for j in range(len(reward)):
-                    reward_prime.append(reward[j].item())
-                reward_prime.append(0)
-                reward_prime = np.array(reward_prime).reshape(-1)
                 break
-        if not done:
-            reward = copy.deepcopy(self.episode_buffer[7])
-            reward_prime = []
-            for j in range(len(reward)):
-                reward_prime.append(reward[j].item())
-            node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
-            with torch.no_grad():
-                _, _, value, _ = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask,
-                                                edge_padding_mask, edge_mask, self.greedy)
-            reward_prime.append(value.item())
-            reward_prime = np.array(reward_prime).reshape(-1)
 
-        discounted_rewards = discount(reward_prime, GAMMA)[:-1]
-        discounted_rewards = discounted_rewards.tolist()
-        for j in range(len(discounted_rewards)):
-            self.episode_buffer[15] += torch.FloatTensor([discounted_rewards[j]]).unsqueeze(0)
+        with torch.no_grad():
+            if done:
+                next_value = 0
+            else:
+                node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
+                _, next_value = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
+                next_value = next_value.item()
+            LAMBDA = 0
+            lastgaelam = 0
+            for j in reversed(range(len(self.episode_buffer[10]))):
+                if j == len(self.episode_buffer[10]) - 1:
+                    nextnonterminal = 1.0 - done
+                    nextvalue = next_value
+                else:
+                    nextnonterminal = 1.0 - self.episode_buffer[10][j + 1]
+                    nextvalue = self.episode_buffer[9][j + 1]
+                delta = self.episode_buffer[9][j].item() + GAMMA * nextvalue * nextnonterminal - self.episode_buffer[8][j].item()
+                lastgaelam = delta + GAMMA * LAMBDA * nextnonterminal * lastgaelam
+                self.episode_buffer[11].insert(0, torch.FloatTensor([[lastgaelam]]).to(self.device))
+            self.episode_buffer[12] = [adv + val for adv, val in zip(self.episode_buffer[11], self.episode_buffer[8])]
 
         # save metrics
         self.perf_metrics['travel_dist'] = self.travel_dist

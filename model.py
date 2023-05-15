@@ -220,7 +220,7 @@ class AttnNet(nn.Module):
 
         return enhanced_node_feature
 
-    def output_policy(self, enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask, greedy=False, action=None):
+    def output_policy(self, enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask):
         current_edge = edge_inputs.permute(0, 2, 1)
         embedding_dim = enhanced_node_feature.size()[2]
 
@@ -242,19 +242,10 @@ class AttnNet(nn.Module):
         value = self.value_layer(enhanced_current_node_feature)
         logp = self.pointer(enhanced_current_node_feature, neigboring_feature, current_mask)
         logp = logp.squeeze(1) # batch_size*k_size
-        entropy = (logp * logp.exp()).sum(-1).mean()
-        if action is not None:
-            action = action
-        else:
-            if not greedy:
-                action = torch.multinomial(logp.exp(), 1).long()
-            else:
-                action = torch.argmax(logp, dim=1).long()
-        logp = torch.gather(logp, 1, action)
 
-        return action, logp, value, entropy
+        return logp, value
 
-    def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None, greedy=False, action=None):
+    def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None):
         enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-        action, logp, value, entropy = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask, greedy, action)
-        return action, logp, value, entropy
+        logp, value = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask)
+        return logp, value

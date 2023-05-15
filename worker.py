@@ -14,7 +14,7 @@ def discount(x, gamma):
 
 
 class Worker:
-    def __init__(self, meta_agent_id, policy_net, critic_net, global_step, device='cuda', greedy=False, save_image=False):
+    def __init__(self, meta_agent_id, network, global_step, device='cuda', greedy=False, save_image=False):
         self.device = device
         self.greedy = greedy
         self.metaAgentID = meta_agent_id
@@ -24,8 +24,7 @@ class Worker:
         self.save_image = save_image
 
         self.env = Env(map_index=self.global_step, k_size=self.k_size, plot=save_image)
-        self.local_policy_net = policy_net
-        self.local_critic_net = critic_net
+        self.local_net = network
 
         self.current_node_index = 0
         self.travel_dist = 0
@@ -101,8 +100,8 @@ class Worker:
     def select_node(self, observations):
         node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
         with torch.no_grad():
-            action_index, logp, entropy = self.local_policy_net(node_inputs, edge_inputs, current_index, node_padding_mask,
-                                                                edge_padding_mask, edge_mask, self.greedy)
+            action_index, *_ = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask,
+                                              edge_padding_mask, edge_mask, self.greedy)
 
         next_node_index = edge_inputs[0, 0, action_index.item()]
         next_position = self.env.node_coords[next_node_index]
@@ -170,7 +169,8 @@ class Worker:
                 reward_prime.append(reward[j].item())
             node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
             with torch.no_grad():
-                value, _ = self.local_critic_net(node_inputs, current_index, node_padding_mask, edge_mask)
+                _, _, value, _ = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask,
+                                                edge_padding_mask, edge_mask, self.greedy)
             reward_prime.append(value.item())
             reward_prime = np.array(reward_prime).reshape(-1)
 

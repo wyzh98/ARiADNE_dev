@@ -203,11 +203,12 @@ class Decoder(nn.Module):
         return tgt, w
 
 
-class PolicyNet(nn.Module):
+class AttnNet(nn.Module):
     def __init__(self, input_dim, embedding_dim):
-        super(PolicyNet, self).__init__()
+        super(AttnNet, self).__init__()
         self.initial_embedding = nn.Linear(input_dim, embedding_dim) # layer for non-end position
         self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+        self.value_layer = nn.Linear(embedding_dim, 1)
 
         self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
         self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
@@ -238,6 +239,7 @@ class PolicyNet(nn.Module):
 
         enhanced_current_node_feature, _ = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
         enhanced_current_node_feature = self.current_embedding(torch.cat((enhanced_current_node_feature, current_node_feature), dim=-1))
+        value = self.value_layer(enhanced_current_node_feature)
         logp = self.pointer(enhanced_current_node_feature, neigboring_feature, current_mask)
         logp = logp.squeeze(1) # batch_size*k_size
         entropy = (logp * logp.exp()).sum(-1).mean()
@@ -250,40 +252,9 @@ class PolicyNet(nn.Module):
                 action = torch.argmax(logp, dim=1).long()
         logp = torch.gather(logp, 1, action)
 
-        return action, logp, entropy
+        return action, logp, value, entropy
 
     def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None, greedy=False, action=None):
         enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-        action, logp, entropy = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask, greedy, action)
-        return action, logp, entropy
-
-
-class CriticNet(nn.Module):
-    def __init__(self, input_dim, embedding_dim):
-        super(CriticNet, self).__init__()
-        self.initial_embedding = nn.Linear(input_dim, embedding_dim) # layer for non-end position
-        self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
-
-        self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
-        self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
-
-        self.values_layer = nn.Linear(embedding_dim, 1)
-
-    def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
-        embedding_feature = self.initial_embedding(node_inputs)
-        embedding_feature = self.encoder(src=embedding_feature, key_padding_mask=node_padding_mask, attn_mask=edge_mask)
-
-        return embedding_feature
-
-    def output_values(self, enhanced_node_feature, current_index, node_padding_mask):
-        embedding_dim = enhanced_node_feature.size()[2]
-        current_node_feature = torch.gather(enhanced_node_feature, 1, current_index.repeat(1, 1, embedding_dim))
-        enhanced_current_node_feature, attention_weights = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
-        enhanced_current_node_feature = self.current_embedding(torch.cat((enhanced_current_node_feature, current_node_feature), dim=-1))
-        values = self.values_layer(enhanced_current_node_feature)
-        return values, attention_weights
-
-    def forward(self, node_inputs, current_index, node_padding_mask=None, edge_mask=None):
-        enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-        values, attention_weights = self.output_values(enhanced_node_feature, current_index, node_padding_mask)
-        return values, attention_weights
+        action, logp, value, entropy = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask, greedy, action)
+        return action, logp, value, entropy

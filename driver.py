@@ -11,6 +11,7 @@ import wandb
 from model import AttnNet
 from runner import RLRunner
 from parameter import *
+from copy import deepcopy
 
 ray.init()
 print("Welcome to RL autonomous exploration!")
@@ -84,7 +85,7 @@ def main():
     meta_agents = [RLRunner.remote(i) for i in range(NUM_META_AGENT)]
 
     # get global networks weights
-    old_net.load_state_dict(global_net.state_dict())
+    old_net.load_state_dict(deepcopy(global_net.state_dict()))
 
     if device != local_device:
         network_weights = global_net.to(local_device).state_dict()
@@ -224,7 +225,7 @@ def main():
                     perf_metrics[n] = []
 
             # get the updated global weights
-            old_net.load_state_dict(global_net.state_dict())
+            old_net.load_state_dict(deepcopy(global_net.state_dict()))
             if device != local_device:
                 network_weights = global_net.to(local_device).state_dict()
                 global_net.to(device)

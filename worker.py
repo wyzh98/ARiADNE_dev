@@ -213,3 +213,11 @@ class Worker:
             os.remove(filename)
 
 
+if __name__ == '__main__':
+    from model import AttnNet
+    ep = 10000
+    device = torch.device('cuda') if USE_GPU_GLOBAL else torch.device('cpu')
+    net = AttnNet(INPUT_DIM, EMBEDDING_DIM).to(device)
+    worker = Worker(0, net, ep, device)
+    worker.work(ep)
+

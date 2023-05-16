@@ -130,7 +130,7 @@ def main():
 
                 if len(experience_buffer[0]) < BATCH_SIZE:
                     experience_buffer = []
-                    for i in range(16):
+                    for i in range(13):
                         experience_buffer.append([])
                     perf_metrics = {}
                     for n in metric_name:
@@ -158,7 +158,7 @@ def main():
                 return_batch = torch.stack(rollouts[12]).to(device)
 
                 # PPO
-                for i in range(8):
+                for i in range(2):
                     new_logp, value = dp_network(node_inputs_batch,
                                                  edge_inputs_batch,
                                                  current_inputs_batch,

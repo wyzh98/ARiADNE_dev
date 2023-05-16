@@ -160,7 +160,7 @@ class Worker:
                 node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
                 _, next_value = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
                 next_value = next_value.item()
-            LAMBDA = 0
+            LAMBDA = 0.0
             lastgaelam = 0
             for j in reversed(range(len(self.episode_buffer[10]))):
                 if j == len(self.episode_buffer[10]) - 1:
@@ -168,7 +168,7 @@ class Worker:
                     nextvalue = next_value
                 else:
                     nextnonterminal = 1.0 - self.episode_buffer[10][j + 1]
-                    nextvalue = self.episode_buffer[9][j + 1]
+                    nextvalue = self.episode_buffer[8][j + 1]
                 delta = self.episode_buffer[9][j].item() + GAMMA * nextvalue * nextnonterminal - self.episode_buffer[8][j].item()
                 lastgaelam = delta + GAMMA * LAMBDA * nextnonterminal * lastgaelam
                 self.episode_buffer[11].insert(0, torch.FloatTensor([[lastgaelam]]).to(self.device))

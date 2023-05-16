@@ -32,6 +32,7 @@ def writeToTensorBoard(writer, tensorboardData, curr_episode):
     metrics = {'Losses/Value': value,
                'Losses/Policy Loss': policyLoss,
                'Losses/Q Value Loss': qValueLoss,
+               'Losses/Return': returns,
                'Losses/Entropy': entropy,
                'Losses/Grad Norm': gradNorm,
                'Losses/Clip Frac': clipFrac,

@@ -100,6 +100,7 @@ def main():
         rnd_target_weights = global_rnd_target.to(local_device).state_dict()
         global_net.to(device)
         global_rnd_predictor.to(device)
+        global_rnd_target.to(device)
     else:
         network_weights = global_net.to(local_device).state_dict()
         rnd_predictor_weights = global_rnd_predictor.to(local_device).state_dict()

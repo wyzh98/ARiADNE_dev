@@ -248,14 +248,20 @@ def main():
             # get the updated global weights
             if device != local_device:
                 network_weights = global_net.to(local_device).state_dict()
+                rnd_predictor_weights = global_rnd_predictor.to(local_device).state_dict()
+                rnd_target_weights = global_rnd_target.to(local_device).state_dict()
                 global_net.to(device)
+                global_rnd_predictor.to(device)
+                global_rnd_target.to(device)
             else:
                 network_weights = global_net.to(local_device).state_dict()
+                rnd_predictor_weights = global_rnd_predictor.to(local_device).state_dict()
+                rnd_target_weights = global_rnd_target.to(local_device).state_dict()
 
             job_list = []
             for i, meta_agent in enumerate(meta_agents):
                 curr_episode += 1
-                job_list.append(meta_agent.job.remote(network_weights, curr_episode))
+                job_list.append(meta_agent.job.remote([network_weights, rnd_predictor_weights, rnd_target_weights], curr_episode))
 
             # save the model
             if curr_episode % 64 == 0:

@@ -14,7 +14,7 @@ def discount(x, gamma):
 
 
 class Worker:
-    def __init__(self, meta_agent_id, network, global_step, device='cuda', greedy=False, save_image=False):
+    def __init__(self, meta_agent_id, network, rnd_predictor, rnd_target, global_step, device='cuda', greedy=False, save_image=False):
         self.device = device
         self.greedy = greedy
         self.metaAgentID = meta_agent_id
@@ -25,6 +25,8 @@ class Worker:
 
         self.env = Env(map_index=self.global_step, k_size=self.k_size, plot=save_image)
         self.local_net = network
+        self.rnd_predictor = rnd_predictor
+        self.rnd_target = rnd_target
 
         self.current_node_index = 0
         self.travel_dist = 0
@@ -32,7 +34,7 @@ class Worker:
 
         self.episode_buffer = []
         self.perf_metrics = dict()
-        for i in range(13):
+        for i in range(17):
             self.episode_buffer.append([])
 
     def get_observations(self):
@@ -100,7 +102,7 @@ class Worker:
     def select_node(self, observations):
         node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
         with torch.no_grad():
-            logp_list, value = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
+            logp_list, value_ext, value_int = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
         if not self.greedy:
             action_index = torch.multinomial(logp_list.exp(), 1).long()
         else:
@@ -110,7 +112,17 @@ class Worker:
         next_position = self.env.node_coords[next_node_index]
         logp = torch.gather(logp_list, 1, action_index)
 
-        return next_position, action_index, logp, value
+        return next_position, action_index, logp, value_ext, value_int
+
+    def get_curiosity_reward(self, next_observations):
+        node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = next_observations
+        with torch.no_grad():
+            predict_next_feature = self.rnd_predictor(node_inputs, edge_inputs, current_index, node_padding_mask,
+                                                      edge_padding_mask, edge_mask)
+            target_next_feature = self.rnd_target(node_inputs, edge_inputs, current_index, node_padding_mask,
+                                                  edge_padding_mask, edge_mask)
+        curiosity_reward = ((predict_next_feature - target_next_feature).pow(2).sum(dim=-1) / 2).item()
+        return curiosity_reward
 
     def save_observations(self, observations):
         node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
@@ -121,14 +133,16 @@ class Worker:
         self.episode_buffer[4] += copy.deepcopy(edge_padding_mask)
         self.episode_buffer[5] += copy.deepcopy(edge_mask)
 
-    def save_action_value(self, action_index, logp, value):
+    def save_action_value(self, action_index, logp, value_ext, value_int):
         self.episode_buffer[6] += action_index
         self.episode_buffer[7] += logp.unsqueeze(0)
-        self.episode_buffer[8] += value
+        self.episode_buffer[8] += value_ext
+        self.episode_buffer[13] += value_int
 
-    def save_reward_done(self, reward, done):
+    def save_reward_done(self, reward, cur_reward, done):
         self.episode_buffer[9] += copy.deepcopy(torch.FloatTensor([[[reward]]]).to(self.device))
         self.episode_buffer[10] += copy.deepcopy(torch.tensor([[[(int(done))]]]).to(self.device))
+        self.episode_buffer[14] += copy.deepcopy(torch.FloatTensor([[[cur_reward]]]).to(self.device))
 
     def run_episode(self, curr_episode):
         done = False
@@ -136,13 +150,15 @@ class Worker:
         observations = self.get_observations()
         for i in range(128):
             self.save_observations(observations)
-            next_position, action_index, logp, value = self.select_node(observations)
+            next_position, action_index, logp, value_ext, value_int = self.select_node(observations)
 
-            self.save_action_value(action_index, logp, value)
+            self.save_action_value(action_index, logp, value_ext, value_int)
             reward, done, self.robot_position, self.travel_dist = self.env.step(self.robot_position, next_position, self.travel_dist)
-            self.save_reward_done(reward, done)
  
             observations = self.get_observations()
+
+            curiosity_reward = self.get_curiosity_reward(observations)
+            self.save_reward_done(reward, curiosity_reward, done)
 
             # save a frame
             if self.save_image:
@@ -155,24 +171,36 @@ class Worker:
 
         with torch.no_grad():
             if done:
-                next_value = 0
+                next_value_ext = 0
+                next_value_int = 0
             else:
                 node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
-                _, next_value = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
-                next_value = next_value.item()
+                _, next_value_ext, next_value_int = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
+                next_value_ext, next_value_int = next_value_ext.item(), next_value_int.item()
             LAMBDA = 0
-            lastgaelam = 0
+            INT_GAMMA = 0.99
+            ext_lastgaelam = 0
+            int_lastgaelam = 0
             for j in reversed(range(len(self.episode_buffer[10]))):
                 if j == len(self.episode_buffer[10]) - 1:
-                    nextnonterminal = 1.0 - done
-                    nextvalue = next_value
+                    ext_nextnonterminal = 1.0 - done
+                    int_nextnonterminal = 1.0
+                    ext_nextvalue = next_value_ext
+                    int_nextvalue = next_value_int
                 else:
-                    nextnonterminal = 1.0 - self.episode_buffer[10][j + 1]
-                    nextvalue = self.episode_buffer[9][j + 1]
-                delta = self.episode_buffer[9][j].item() + GAMMA * nextvalue * nextnonterminal - self.episode_buffer[8][j].item()
-                lastgaelam = delta + GAMMA * LAMBDA * nextnonterminal * lastgaelam
-                self.episode_buffer[11].insert(0, torch.FloatTensor([[lastgaelam]]).to(self.device))
+                    ext_nextnonterminal = 1.0 - self.episode_buffer[10][j + 1]
+                    int_nextnonterminal = 1.0
+                    ext_nextvalue = self.episode_buffer[8][j + 1]
+                    int_nextvalue = self.episode_buffer[13][j + 1]
+                ext_delta = self.episode_buffer[9][j].item() + GAMMA * ext_nextvalue * ext_nextnonterminal - self.episode_buffer[8][j].item()
+                int_delta = self.episode_buffer[14][j].item() + INT_GAMMA * int_nextvalue * int_nextnonterminal - self.episode_buffer[13][j].item()
+                ext_lastgaelam = ext_delta + GAMMA * LAMBDA * ext_nextnonterminal * ext_lastgaelam
+                int_lastgaelam = int_delta + INT_GAMMA * LAMBDA * int_nextnonterminal * int_lastgaelam
+                self.episode_buffer[11].insert(0, torch.FloatTensor([[ext_lastgaelam]]).to(self.device))
+                self.episode_buffer[15].insert(0, torch.FloatTensor([[int_lastgaelam]]).to(self.device))
+
             self.episode_buffer[12] = [adv + val for adv, val in zip(self.episode_buffer[11], self.episode_buffer[8])]
+            self.episode_buffer[16] = [adv + val for adv, val in zip(self.episode_buffer[15], self.episode_buffer[13])]
 
         # save metrics
         self.perf_metrics['travel_dist'] = self.travel_dist
@@ -209,10 +237,12 @@ class Worker:
 
 
 if __name__ == '__main__':
-    from model import AttnNet
+    from model import AttnNet, RNDModel
     ep = 10000
     device = torch.device('cuda') if USE_GPU_GLOBAL else torch.device('cpu')
     net = AttnNet(INPUT_DIM, EMBEDDING_DIM).to(device)
-    worker = Worker(0, net, ep, device)
+    rnd_p = RNDModel(INPUT_DIM, EMBEDDING_DIM).to(device)
+    rnd_t = RNDModel(INPUT_DIM, EMBEDDING_DIM).to(device)
+    worker = Worker(0, net, rnd_p, rnd_t, ep, device)
     worker.work(ep)
 

@@ -208,7 +208,8 @@ class AttnNet(nn.Module):
         super(AttnNet, self).__init__()
         self.initial_embedding = nn.Linear(input_dim, embedding_dim) # layer for non-end position
         self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
-        self.value_layer = nn.Linear(embedding_dim, 1)
+        self.ext_value_layer = nn.Linear(embedding_dim, 1)
+        self.int_value_layer = nn.Linear(embedding_dim, 1)
 
         self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
         self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
@@ -239,13 +240,40 @@ class AttnNet(nn.Module):
 
         enhanced_current_node_feature, _ = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
         enhanced_current_node_feature = self.current_embedding(torch.cat((enhanced_current_node_feature, current_node_feature), dim=-1))
-        value = self.value_layer(enhanced_current_node_feature)
+        value_ext = self.ext_value_layer(enhanced_current_node_feature)
+        value_int = self.int_value_layer(enhanced_current_node_feature)
         logp = self.pointer(enhanced_current_node_feature, neigboring_feature, current_mask)
         logp = logp.squeeze(1) # batch_size*k_size
 
-        return logp, value
+        return logp, value_ext, value_int
 
     def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None):
         enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-        logp, value = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask)
-        return logp, value
+        logp, value_ext, value_int = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask)
+        return logp, value_ext, value_int
+
+
+class RNDModel(nn.Module):
+    def __init__(self, input_dim, embedding_dim):
+        super(RNDModel, self).__init__()
+        self.initial_embedding = nn.Linear(input_dim, embedding_dim)
+        self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+
+        self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
+        self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
+
+        self.output = nn.Linear(embedding_dim, 1)
+
+    def predictor(self, node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask):
+        node_feature = self.initial_embedding(node_inputs)
+        enhanced_node_feature = self.encoder(src=node_feature, key_padding_mask=node_padding_mask, attn_mask=edge_mask)
+        embedding_dim = enhanced_node_feature.size()[2]
+        current_node_feature = torch.gather(enhanced_node_feature, 1, current_index.repeat(1, 1, embedding_dim))
+        enhanced_current_node_feature, _ = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
+        enhanced_current_node_feature = self.current_embedding(torch.cat((enhanced_current_node_feature, current_node_feature), dim=-1))
+        feature = self.output(enhanced_current_node_feature)
+        return feature
+
+    def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None):
+        feature = self.predictor(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
+        return feature

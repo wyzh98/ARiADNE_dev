@@ -6,12 +6,12 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from env import Env
-from model import PolicyNet
+from model import AttnNet
 from test_parameter import *
 
 
 class TestWorker:
-    def __init__(self, meta_agent_id, policy_net, global_step, device='cuda', greedy=False, save_image=False):
+    def __init__(self, meta_agent_id, network, global_step, device='cuda', greedy=False, save_image=False):
         self.device = device
         self.greedy = greedy
         self.metaAgentID = meta_agent_id
@@ -20,7 +20,7 @@ class TestWorker:
         self.save_image = save_image
 
         self.env = Env(map_index=self.global_step, k_size=self.k_size, plot=save_image, test=True)
-        self.local_policy_net = policy_net
+        self.local_net = network
         self.travel_dist = 0
         self.robot_position = self.env.start_position
         self.perf_metrics = dict()
@@ -133,7 +133,7 @@ class TestWorker:
     def select_node(self, observations):
         node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask = observations
         with torch.no_grad():
-            logp_list = self.local_policy_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
+            logp_list, _ = self.local_net(node_inputs, edge_inputs, current_index, node_padding_mask, edge_padding_mask, edge_mask)
 
         if self.greedy:
             action_index = torch.argmax(logp_list, dim=1).long()

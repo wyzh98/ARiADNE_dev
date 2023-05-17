@@ -84,6 +84,7 @@ def main():
         checkpoint = torch.load(model_path + '/checkpoint.pth', map_location=device)
         global_net.load_state_dict(checkpoint['model'])
         global_rnd_predictor.load_state_dict(checkpoint['predictor'])
+        global_rnd_target.load_state_dict(checkpoint['target'])
         global_optimizer.load_state_dict(checkpoint['optimizer'])
         lr_decay.load_state_dict(checkpoint['lr_decay'])
         curr_episode = checkpoint['episode']
@@ -268,6 +269,8 @@ def main():
                 print('Saving model', end='\n')
                 checkpoint = {"model": global_net.state_dict(),
                               "optimizer": global_optimizer.state_dict(),
+                              "predictor": global_rnd_predictor.state_dict(),
+                              "target": global_rnd_target.state_dict(),
                               "episode": curr_episode,
                               "lr_decay": lr_decay.state_dict(),
                               }

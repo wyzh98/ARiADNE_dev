@@ -159,7 +159,7 @@ def main():
                 return_batch = torch.stack(rollouts[12]).to(device)
 
                 # PPO
-                for i in range(2):
+                for i in range(8):
                     new_logp, value = dp_network(node_inputs_batch,
                                                  edge_inputs_batch,
                                                  current_inputs_batch,
@@ -175,11 +175,11 @@ def main():
                     value_loss = nn.MSELoss()(value, return_batch.detach()).mean()
                     entropy = -(new_logp * new_logp.exp()).sum(dim=-1).mean()
 
-                    total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
+                    total_loss = policy_loss + 0.5 * value_loss - 0.0 * entropy
 
                     global_optimizer.zero_grad()
                     total_loss.backward()
-                    grad_norm = torch.nn.utils.clip_grad_norm_(global_net.parameters(), max_norm=10, norm_type=2)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(global_net.parameters(), max_norm=200, norm_type=2)
                     global_optimizer.step()
 
                 with torch.no_grad():

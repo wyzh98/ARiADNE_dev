@@ -22,6 +22,7 @@ class Env():
         self.ground_truth, self.start_position = self.import_ground_truth(
             self.map_dir + '/' + self.map_list[self.map_index])
         self.ground_truth_size = np.shape(self.ground_truth)  # (480, 640)
+        self.angle = 0  # range: 0-360deg
 
         # initialize robot_belief
         self.robot_belief = np.ones(self.ground_truth_size) * 127  # unexplored 127
@@ -30,13 +31,14 @@ class Env():
 
         # initialize parameters
         self.resolution = 4  # to downsample the map
-        self.sensor_range = 80
+        self.sensor_range = 100
         self.explored_rate = 0
 
         # initialize graph generator
         self.graph_generator = Graph_generator(map_size=self.ground_truth_size, sensor_range=self.sensor_range, k_size=k_size, plot=plot)
         self.graph_generator.route_node.append(self.start_position)
-        self.node_coords, self.graph, self.node_utility, self.guidepost = None, None, None, None
+        self.graph_generator.gaze_degree.append(self.angle)
+        self.node_coords, self.graph, self.node_utility, self.guidepost, self.node_frontier_distribution = None, None, None, None, None
         self.frontiers = None
 
         self.begin()
@@ -54,8 +56,8 @@ class Env():
         return index
 
     def begin(self):
-        self.robot_belief = self.update_robot_belief(self.start_position, self.sensor_range, self.robot_belief,
-                                                     self.ground_truth)\
+        self.robot_belief = self.update_robot_belief(self.start_position, 0, self.sensor_range, self.robot_belief,
+                                                     self.ground_truth)
 
         # downsampled belief has lower resolution than robot belief
         self.downsampled_belief = block_reduce(self.robot_belief.copy(), block_size=(self.resolution, self.resolution),
@@ -63,8 +65,8 @@ class Env():
         self.frontiers = self.find_frontier()
         self.old_robot_belief = copy.deepcopy(self.robot_belief)
 
-        self.node_coords, self.graph, self.node_utility, self.guidepost = self.graph_generator.generate_graph(
-            self.start_position, self.robot_belief, self.frontiers)
+        self.node_coords, self.graph, self.node_utility, self.guidepost, self.node_frontier_distribution = \
+            self.graph_generator.generate_graph(self.start_position, self.robot_belief, self.frontiers)
 
     def step(self, robot_position, next_position, travel_dist):
         # move the robot to the selected position and update its belief
@@ -73,26 +75,32 @@ class Env():
 
         robot_position = next_position
         self.graph_generator.route_node.append(robot_position)
-        next_node_index = self.find_index_from_coords(robot_position)
-        self.graph_generator.nodes_list[next_node_index].set_visited()
-        self.robot_belief = self.update_robot_belief(robot_position, self.sensor_range, self.robot_belief,
+        # next_node_index = self.find_index_from_coords(robot_position)
+        # self.graph_generator.nodes_list[next_node_index].set_visited()
+        # Greedy angle selection
+        angle = self.graph_generator.find_greedy_angle(robot_position)
+        self.graph_generator.gaze_degree.append(angle)
+        self.robot_belief = self.update_robot_belief(robot_position, angle, self.sensor_range, self.robot_belief,
                                                      self.ground_truth)
         self.downsampled_belief = block_reduce(self.robot_belief.copy(), block_size=(self.resolution, self.resolution),
                                                func=np.min)
 
         frontiers = self.find_frontier()
         self.explored_rate = self.evaluate_exploration_rate()
+        # print(robot_position, self.angle)
 
         # calculate the reward associated with the action
-        reward = self.calculate_reward(dist, frontiers)
+        exploration = np.sum(self.robot_belief == 255) - np.sum(self.old_robot_belief == 255)
+        reward = self.calculate_reward(dist, frontiers, exploration, self.angle, angle)
+        self.angle = angle
 
         if self.plot:
             self.xPoints.append(robot_position[0])
             self.yPoints.append(robot_position[1])
 
         # update the graph
-        self.node_coords, self.graph, self.node_utility, self.guidepost = self.graph_generator.update_graph(
-            robot_position, self.robot_belief, self.old_robot_belief, frontiers, self.frontiers)
+        self.node_coords, self.graph, self.node_utility, self.guidepost, self.node_frontier_distribution = \
+            self.graph_generator.update_graph(robot_position, self.robot_belief, self.old_robot_belief, frontiers, self.frontiers)
         self.old_robot_belief = copy.deepcopy(self.robot_belief)
 
         self.frontiers = frontiers
@@ -118,8 +126,8 @@ class Env():
         free = np.asarray([index[1], index[0]]).T
         return free
 
-    def update_robot_belief(self, robot_position, sensor_range, robot_belief, ground_truth):
-        robot_belief = sensor_work(robot_position, sensor_range, robot_belief, ground_truth)
+    def update_robot_belief(self, robot_position, angle, sensor_range, robot_belief, ground_truth):
+        robot_belief = sensor_work(robot_position, angle, sensor_range, robot_belief, ground_truth)
         return robot_belief
 
     def check_done(self):
@@ -130,10 +138,13 @@ class Env():
             done = True
         return done
 
-    def calculate_reward(self, dist, frontiers):
+    def calculate_reward(self, dist, frontiers, exploration, last_angle, angle):
         reward = 0
         reward -= dist / 64
-
+        d_angle = min(np.abs(last_angle - angle), 360 - np.abs(last_angle - angle))
+        reward -= d_angle / 180 / 5
+        if dist == 0 and last_angle == angle:
+            reward -= 1
         # check the num of observed frontiers
         frontiers_to_check = frontiers[:, 0] + frontiers[:, 1] * 1j
         pre_frontiers_to_check = self.frontiers[:, 0] + self.frontiers[:, 1] * 1j
@@ -141,7 +152,8 @@ class Env():
         pre_frontiers_num = pre_frontiers_to_check.shape[0]
         delta_num = pre_frontiers_num - frontiers_num
 
-        reward += delta_num / 50
+        reward += delta_num / 32
+        # reward += exploration / 5000
 
         return reward
 
@@ -206,15 +218,27 @@ class Env():
         plt.axis((0, self.ground_truth_size[1], self.ground_truth_size[0], 0))
         # for i in range(len(self.graph_generator.x)):
         #    plt.plot(self.graph_generator.x[i], self.graph_generator.y[i], 'tan', zorder=1)  # plot edges will take long time
+        # node_coords = copy.deepcopy(self.node_coords)
+        # arrow_colors = []
+        # for node in self.graph_generator.route_node:
+        #     if node in node_coords:
+        #         node_coords.remove(node)
         plt.scatter(self.node_coords[:, 0], self.node_coords[:, 1], c=self.node_utility, zorder=5)
         plt.scatter(self.frontiers[:, 0], self.frontiers[:, 1], c='r', s=2, zorder=3)
         plt.plot(self.xPoints, self.yPoints, 'b', linewidth=2)
-        plt.plot(self.xPoints[-1], self.yPoints[-1], 'mo', markersize=8)
-        plt.plot(self.xPoints[0], self.yPoints[0], 'co', markersize=8)
+        plt.plot(self.xPoints[-1], self.yPoints[-1], 'mo', markersize=8, zorder=8)
+        plt.quiver(self.xPoints[-1], self.yPoints[-1], np.cos(self.angle * np.pi / 180), np.sin(self.angle * np.pi / 180),
+                   width=0.007, angles='xy', color='m', zorder=10)
+        for i, node in enumerate(self.graph_generator.route_node):
+            if i != 0 and i != len(self.graph_generator.route_node) - 1:
+                gaze_degree = self.graph_generator.gaze_degree[i] * np.pi / 180
+                plt.quiver(*node, np.cos(gaze_degree), np.sin(gaze_degree), angles='xy', color='y', zorder=6, width=0.004, scale=40, pivot='mid')
+        # plt.plot(self.xPoints[0], self.yPoints[0], 'co', markersize=8)
         # plt.pause(0.1)
         plt.suptitle('Explored ratio: {:.4g}  Travel distance: {:.4g}'.format(self.explored_rate, travel_dist))
         plt.tight_layout()
         plt.savefig('{}/{}_{}_samples.png'.format(path, n, step, dpi=150))
         # plt.show()
+        plt.close()
         frame = '{}/{}_{}_samples.png'.format(path, n, step)
         self.frame_files.append(frame)

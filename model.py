@@ -233,7 +233,7 @@ class PolicyNet(nn.Module):
         else:
             current_mask = None
 
-        current_mask[:,:,0] = 1 # don't stay at current position
+        # current_mask[:,:,0] = 1 # don't stay at current position
         #assert 0 in current_mask
 
         enhanced_current_node_feature, _ = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
@@ -285,7 +285,7 @@ class QNet(nn.Module):
             current_mask = edge_padding_mask
         else:
             current_mask = None
-        current_mask[:, :, 0] = 1  # don't stay at current position
+        # current_mask[:, :, 0] = 1  # don't stay at current position
         #assert 0 in current_mask
         current_mask = current_mask.permute(0, 2, 1)
         zero = torch.zeros_like(q_values).to(q_values.device)

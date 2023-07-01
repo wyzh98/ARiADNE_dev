@@ -2,10 +2,11 @@ import numpy as np
 
 
 class Node():
-    def __init__(self, coords, frontiers, robot_belief):
+    def __init__(self, coords, frontiers, robot_belief, sensor_range):
         self.coords = coords
         self.observable_frontiers = []
-        self.sensor_range = 80
+        self.sensor_range = sensor_range
+        self.frontier_distribution = np.zeros(36)
         self.initialize_observable_frontiers(frontiers, robot_belief)
         self.utility = self.get_node_utility()
         if self.utility == 0:
@@ -20,6 +21,8 @@ class Node():
             collision = self.check_collision(self.coords, point, robot_belief)
             if not collision:
                 self.observable_frontiers.append(point)
+                angle = np.angle((point[0] - self.coords[0]) + (point[1] - self.coords[1]) * 1j, deg=True) + 180 - 1e-8
+                self.frontier_distribution[int(angle / 10)] += 1
 
     def get_node_utility(self):
         return len(self.observable_frontiers)
@@ -31,6 +34,8 @@ class Node():
             for i, point in enumerate(self.observable_frontiers):
                 if point[0] + point[1] * 1j in observed_frontiers[:, 0] + observed_frontiers[:, 1] * 1j:
                     observed_index.append(i)
+                    angle = np.angle((point[0] - self.coords[0]) + (point[1] - self.coords[1]) * 1j, deg=True) + 180 - 1e-8
+                    self.frontier_distribution[int(angle / 10)] -= 1
             for index in reversed(observed_index):
                 self.observable_frontiers.pop(index)
 
@@ -42,6 +47,8 @@ class Node():
                 collision = self.check_collision(self.coords, point, robot_belief)
                 if not collision:
                     self.observable_frontiers.append(point)
+                    angle = np.angle((point[0] - self.coords[0]) + (point[1] - self.coords[1]) * 1j, deg=True) + 180 - 1e-8
+                    self.frontier_distribution[int(angle / 10)] += 1
 
         self.utility = self.get_node_utility()
         if self.utility <= 2:

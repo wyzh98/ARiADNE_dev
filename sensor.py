@@ -42,12 +42,13 @@ def collision_check(x0, y0, x1, y1, ground_truth, robot_belief):
     return robot_belief
 
 
-def sensor_work(robot_position, sensor_range, robot_belief, ground_truth):
+def sensor_work(robot_position, angle, sensor_range, robot_belief, ground_truth):
+    angle_rad = angle * np.pi / 180
     sensor_angle_inc = 0.5 / 180 * np.pi
-    sensor_angle = 0
+    sensor_angle = angle_rad - np.pi / 4
     x0 = robot_position[0]
     y0 = robot_position[1]
-    while sensor_angle < 2 * np.pi:
+    while sensor_angle < angle_rad + np.pi / 4:
         x1 = x0 + np.cos(sensor_angle) * sensor_range
         y1 = y0 + np.sin(sensor_angle) * sensor_range
         robot_belief = collision_check(x0, y0, x1, y1, ground_truth, robot_belief)

@@ -192,3 +192,14 @@ class Worker:
             os.remove(filename)
 
 
+if __name__ == '__main__':
+    from model import PolicyNet, QNet
+    ep = 1
+    device = torch.device('cuda') if USE_GPU_GLOBAL else torch.device('cpu')
+    policy_net = PolicyNet(INPUT_DIM, EMBEDDING_DIM).to(device)
+    checkpoint = torch.load(model_path + '/checkpoint.pth')
+    policy_net.load_state_dict(checkpoint['policy_model'])
+    q_net = QNet(INPUT_DIM, EMBEDDING_DIM).to(device)
+    worker = Worker(0, policy_net, q_net, ep, device, save_image=False)
+    worker.work(ep)
+

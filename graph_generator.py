@@ -20,8 +20,10 @@ class Graph_generator:
         self.sensor_range = sensor_range
         self.route_node = []
         self.nodes_list = []
+        self.gaze_degree = []
         self.node_utility = None
         self.guidepost = None
+        self.node_frontier_distribution = None
 
     def edge_clear_all_nodes(self):
         self.graph = Graph()
@@ -51,7 +53,7 @@ class Graph_generator:
         # save the observable frontiers to be reused
         self.node_utility = []
         for coords in self.node_coords:
-            node = Node(coords, frontiers, robot_belief)
+            node = Node(coords, frontiers, robot_belief, self.sensor_range)
             self.nodes_list.append(node)
             utility = node.utility
             self.node_utility.append(utility)
@@ -64,7 +66,12 @@ class Graph_generator:
             index = np.argwhere(x.reshape(-1) == node[0]+node[1]*1j)[0]
             self.guidepost[index] = 1
 
-        return self.node_coords, self.graph.edges, self.node_utility, self.guidepost
+        node_frontier_distribution = []
+        for node in self.nodes_list:
+            node_frontier_distribution.append(node.frontier_distribution)
+        self.node_frontier_distribution = np.array(node_frontier_distribution)
+
+        return self.node_coords, self.graph.edges, self.node_utility, self.guidepost, self.node_frontier_distribution
 
     def update_graph(self, robot_position, robot_belief, old_robot_belief, frontiers, old_frontiers):
         # add uniform points in the new free area to the node coords
@@ -107,7 +114,7 @@ class Graph_generator:
                 node.update_observable_frontiers(observed_frontiers, new_frontiers, robot_belief)
 
         for new_coords in new_node_coords:
-            node = Node(new_coords, frontiers, robot_belief)
+            node = Node(new_coords, frontiers, robot_belief, self.sensor_range)
             self.nodes_list.append(node)
 
         self.node_utility = []
@@ -122,7 +129,18 @@ class Graph_generator:
             index = np.argwhere(x.reshape(-1) == node[0] + node[1] * 1j)
             self.guidepost[index] = 1
 
-        return self.node_coords, self.graph.edges, self.node_utility, self.guidepost
+        node_frontier_distribution = []
+        for node in self.nodes_list:
+            node_frontier_distribution.append(node.frontier_distribution)
+        self.node_frontier_distribution = np.array(node_frontier_distribution)
+
+        return self.node_coords, self.graph.edges, self.node_utility, self.guidepost, self.node_frontier_distribution
+
+    def find_greedy_angle(self, robot_position):
+        node_index = self.find_index_from_coords(self.node_coords, robot_position)
+        max_frontier_index = np.argmax(self.node_frontier_distribution[node_index])
+        mid_degree = max_frontier_index * 10 - 175
+        return mid_degree
 
     def generate_uniform_points(self):
         x = np.linspace(0, self.map_x - 1, 30).round().astype(int)

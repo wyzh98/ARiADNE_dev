@@ -134,7 +134,7 @@ class Env():
         done = False
         if self.test and np.sum(self.ground_truth == 255) - np.sum(self.robot_belief == 255) <= 250:
             done = True
-        elif np.sum(self.node_utility) == 0:
+        elif np.sum(self.node_utility) == 0 or (np.sum(self.robot_belief == 255) / np.sum(self.ground_truth == 255) > 0.99):
             done = True
         return done
 

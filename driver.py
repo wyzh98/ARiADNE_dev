@@ -152,7 +152,7 @@ def main():
 
     # initialize training replay buffer
     experience_buffer = []
-    for i in range(15):
+    for i in range(19):
         experience_buffer.append([])
     
     # collect data from worker and do training
@@ -198,38 +198,50 @@ def main():
                     node_inputs_batch = torch.stack(rollouts[0]).to(device)
                     edge_inputs_batch = torch.stack(rollouts[1]).to(device)
                     current_inputs_batch = torch.stack(rollouts[2]).to(device)
-                    node_padding_mask_batch = torch.stack(rollouts[3]).to(device)
-                    edge_padding_mask_batch = torch.stack(rollouts[4]).to(device)
-                    edge_mask_batch = torch.stack(rollouts[5]).to(device)
-                    action_batch = torch.stack(rollouts[6]).to(device)
-                    reward_batch = torch.stack(rollouts[7]).to(device)
-                    done_batch = torch.stack(rollouts[8]).to(device)
-                    next_node_inputs_batch = torch.stack(rollouts[9]).to(device)
-                    next_edge_inputs_batch = torch.stack(rollouts[10]).to(device)
-                    next_current_inputs_batch = torch.stack(rollouts[11]).to(device)
-                    next_node_padding_mask_batch = torch.stack(rollouts[12]).to(device)
-                    next_edge_padding_mask_batch = torch.stack(rollouts[13]).to(device)
-                    next_edge_mask_batch = torch.stack(rollouts[14]).to(device)
+                    node_frontier_distrib_batch = torch.stack(rollouts[3]).to(device)
+                    neighb_gaze_candid_batch = torch.stack(rollouts[4]).to(device)
+                    node_padding_mask_batch = torch.stack(rollouts[5]).to(device)
+                    edge_padding_mask_batch = torch.stack(rollouts[6]).to(device)
+                    edge_mask_batch = torch.stack(rollouts[7]).to(device)
+                    action_batch = torch.stack(rollouts[8]).to(device)
+                    reward_batch = torch.stack(rollouts[9]).to(device)
+                    done_batch = torch.stack(rollouts[10]).to(device)
+                    next_node_inputs_batch = torch.stack(rollouts[11]).to(device)
+                    next_edge_inputs_batch = torch.stack(rollouts[12]).to(device)
+                    next_current_inputs_batch = torch.stack(rollouts[13]).to(device)
+                    next_node_frontier_distrib_batch = torch.stack(rollouts[14]).to(device)
+                    next_neighb_gaze_candid_batch = torch.stack(rollouts[15]).to(device)
+                    next_node_padding_mask_batch = torch.stack(rollouts[16]).to(device)
+                    next_edge_padding_mask_batch = torch.stack(rollouts[17]).to(device)
+                    next_edge_mask_batch = torch.stack(rollouts[18]).to(device)
 
                     # SAC
                     with torch.no_grad():
-                        q_values1, _ = dp_q_net1(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
-                        q_values2, _ = dp_q_net2(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
+                        q_values1, _ = dp_q_net1(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_frontier_distrib_batch,
+                                                 neighb_gaze_candid_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
+                        q_values2, _ = dp_q_net2(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_frontier_distrib_batch,
+                                                 neighb_gaze_candid_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
                         q_values = torch.min(q_values1, q_values2)
 
-                    logp = dp_policy(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
+                    logp = dp_policy(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_frontier_distrib_batch,
+                                     neighb_gaze_candid_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
                     policy_loss = torch.sum((logp.exp().unsqueeze(2) * (log_alpha.exp().detach() * logp.unsqueeze(2) - q_values.detach())), dim=1).mean()
 
                     with torch.no_grad():
-                        next_logp = dp_policy(next_node_inputs_batch, next_edge_inputs_batch, next_current_inputs_batch, next_node_padding_mask_batch, next_edge_padding_mask_batch, next_edge_mask_batch)
-                        next_q_values1, _ = dp_target_q_net1(next_node_inputs_batch, next_edge_inputs_batch, next_current_inputs_batch, next_node_padding_mask_batch, next_edge_padding_mask_batch, next_edge_mask_batch)
-                        next_q_values2, _ = dp_target_q_net2(next_node_inputs_batch, next_edge_inputs_batch, next_current_inputs_batch, next_node_padding_mask_batch, next_edge_padding_mask_batch, next_edge_mask_batch)
+                        next_logp = dp_policy(next_node_inputs_batch, next_edge_inputs_batch, next_current_inputs_batch, next_node_frontier_distrib_batch,
+                                              next_neighb_gaze_candid_batch, next_node_padding_mask_batch, next_edge_padding_mask_batch, next_edge_mask_batch)
+                        next_q_values1, _ = dp_target_q_net1(next_node_inputs_batch, next_edge_inputs_batch, next_current_inputs_batch, next_node_frontier_distrib_batch,
+                                                             next_neighb_gaze_candid_batch, next_node_padding_mask_batch, next_edge_padding_mask_batch, next_edge_mask_batch)
+                        next_q_values2, _ = dp_target_q_net2(next_node_inputs_batch, next_edge_inputs_batch, next_current_inputs_batch, next_node_frontier_distrib_batch,
+                                                             next_neighb_gaze_candid_batch, next_node_padding_mask_batch, next_edge_padding_mask_batch, next_edge_mask_batch)
                         next_q_values = torch.min(next_q_values1, next_q_values2)
                         value_prime_batch = torch.sum(next_logp.unsqueeze(2).exp() * (next_q_values - log_alpha.exp() * next_logp.unsqueeze(2)), dim=1).unsqueeze(1)
                         target_q_batch = reward_batch + GAMMA * (1 - done_batch) * value_prime_batch
 
-                    q_values1, _ = dp_q_net1(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
-                    q_values2, _ = dp_q_net2(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
+                    q_values1, _ = dp_q_net1(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_frontier_distrib_batch,
+                                             neighb_gaze_candid_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
+                    q_values2, _ = dp_q_net2(node_inputs_batch, edge_inputs_batch, current_inputs_batch, node_frontier_distrib_batch,
+                                             neighb_gaze_candid_batch, node_padding_mask_batch, edge_padding_mask_batch, edge_mask_batch)
                     q1 = torch.gather(q_values1, 1, action_batch)
                     q2 = torch.gather(q_values2, 1, action_batch)
                     mse_loss = nn.MSELoss()

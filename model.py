@@ -208,27 +208,39 @@ class PolicyNet(nn.Module):
         super(PolicyNet, self).__init__()
         self.initial_embedding = nn.Linear(input_dim, embedding_dim) # layer for non-end position
         self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+        self.gaze_embedding = nn.Linear(36, embedding_dim)
+        self.node_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+        self.candid_embedding = nn.Linear(36, embedding_dim)
+        self.fuse_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
 
         self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
         self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
         self.pointer = SingleHeadAttention(embedding_dim)
 
-    def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
+    def encode_graph(self, node_inputs, node_frontier_distribution, node_padding_mask, edge_mask):
         node_feature = self.initial_embedding(node_inputs)
         enhanced_node_feature = self.encoder(src=node_feature, key_padding_mask=node_padding_mask, attn_mask=edge_mask)
+        gaze_feature = self.gaze_embedding(node_frontier_distribution)
+        enhanced_node_feature = self.node_embedding(torch.cat((enhanced_node_feature, gaze_feature), dim=-1))
 
         return enhanced_node_feature
 
-    def output_policy(self, enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask):
+    def output_policy(self, enhanced_node_feature, edge_inputs, current_index, neighbor_gaze_candid, edge_padding_mask, node_padding_mask):
         current_edge = edge_inputs.permute(0, 2, 1)
-        embedding_dim = enhanced_node_feature.size()[2]
+        batch_size, _, embedding_dim = enhanced_node_feature.size()
+        gaze_size = neighbor_gaze_candid.size()[2]
+        neighbor_gaze_feature = self.candid_embedding(neighbor_gaze_candid)  # b, k, gaze_size, embedding_dim
 
         neigboring_feature = torch.gather(enhanced_node_feature, 1, current_edge.repeat(1, 1, embedding_dim))
 
         current_node_feature = torch.gather(enhanced_node_feature, 1, current_index.repeat(1, 1, embedding_dim))
 
+        neigboring_duplicate_feature = neigboring_feature.unsqueeze(2).repeat(1, 1, gaze_size, 1)
+        neighbor_all_feature = self.fuse_embedding(torch.cat((neigboring_duplicate_feature, neighbor_gaze_feature),
+                                                             dim=-1)).reshape(batch_size, -1, embedding_dim)  # check contiguous
+
         if edge_padding_mask is not None:
-            current_mask = edge_padding_mask
+            current_mask = edge_padding_mask.unsqueeze(-1).repeat(1, 1, 1, gaze_size).reshape(batch_size, 1, -1)  # check contiguous
             # print(current_mask)
         else:
             current_mask = None
@@ -238,14 +250,15 @@ class PolicyNet(nn.Module):
 
         enhanced_current_node_feature, _ = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
         enhanced_current_node_feature = self.current_embedding(torch.cat((enhanced_current_node_feature, current_node_feature), dim=-1))
-        logp = self.pointer(enhanced_current_node_feature, neigboring_feature, current_mask)
-        logp= logp.squeeze(1) # batch_size*k_size
+        logp = self.pointer(enhanced_current_node_feature, neighbor_all_feature, current_mask)
+        logp = logp.squeeze(1) # batch_size*k_size
 
         return logp
 
-    def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None, edge_mask=None):
-        enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-        logp = self.output_policy(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask)
+    def forward(self, node_inputs, edge_inputs, current_index, node_frontier_distribution, neighbor_gaze_candid,
+                node_padding_mask=None, edge_padding_mask=None, edge_mask=None):
+        enhanced_node_feature = self.encode_graph(node_inputs, node_frontier_distribution, node_padding_mask, edge_mask)
+        logp = self.output_policy(enhanced_node_feature, edge_inputs, current_index, neighbor_gaze_candid, edge_padding_mask, node_padding_mask)
         return logp
 
 
@@ -254,35 +267,47 @@ class QNet(nn.Module):
         super(QNet, self).__init__()
         self.initial_embedding = nn.Linear(input_dim, embedding_dim) # layer for non-end position
         self.action_embedding = nn.Linear(embedding_dim*3, embedding_dim)
+        self.gaze_embedding = nn.Linear(36, embedding_dim)
+        self.node_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+        self.candid_embedding = nn.Linear(36, embedding_dim)
+        self.fuse_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
 
         self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
         self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
 
         self.q_values_layer = nn.Linear(embedding_dim, 1)
 
-    def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
+    def encode_graph(self, node_inputs, node_frontier_distribution, node_padding_mask, edge_mask):
         embedding_feature = self.initial_embedding(node_inputs)
         embedding_feature = self.encoder(src=embedding_feature, key_padding_mask=node_padding_mask, attn_mask=edge_mask)
+        gaze_feature = self.gaze_embedding(node_frontier_distribution)
+        enhanced_node_feature = self.node_embedding(torch.cat((embedding_feature, gaze_feature), dim=-1))
 
-        return embedding_feature
+        return enhanced_node_feature
 
-    def output_q_values(self, enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask):
+    def output_q_values(self, enhanced_node_feature, edge_inputs, current_index, neighbor_gaze_candid, edge_padding_mask, node_padding_mask):
         k_size = edge_inputs.size()[2]
-        current_edge = edge_inputs
-        current_edge = current_edge.permute(0, 2, 1)
-        embedding_dim = enhanced_node_feature.size()[2]
+        current_edge = edge_inputs.permute(0, 2, 1)
+        batch_size, _, embedding_dim = enhanced_node_feature.size()
+        gaze_size = neighbor_gaze_candid.size()[2]
+        neighbor_gaze_feature = self.candid_embedding(neighbor_gaze_candid)  # b, k, gaze_size, embedding_dim
 
         neigboring_feature = torch.gather(enhanced_node_feature, 1, current_edge.repeat(1, 1, embedding_dim))
 
         current_node_feature = torch.gather(enhanced_node_feature, 1, current_index.repeat(1, 1, embedding_dim))
 
+        neigboring_duplicate_feature = neigboring_feature.unsqueeze(2).repeat(1, 1, gaze_size, 1)
+        neighbor_all_feature = self.fuse_embedding(torch.cat((neigboring_duplicate_feature, neighbor_gaze_feature),
+                                                             dim=-1)).reshape(batch_size, -1, embedding_dim)  # check contiguous
+
         enhanced_current_node_feature, attention_weights = self.decoder(current_node_feature, enhanced_node_feature, node_padding_mask)
-        action_features = torch.cat((enhanced_current_node_feature.repeat(1, k_size, 1), current_node_feature.repeat(1, k_size, 1), neigboring_feature), dim=-1)
+        action_features = torch.cat((enhanced_current_node_feature.repeat(1, k_size*gaze_size, 1),
+                                     current_node_feature.repeat(1, k_size*gaze_size, 1), neighbor_all_feature), dim=-1)
         action_features = self.action_embedding(action_features)
         q_values = self.q_values_layer(action_features)
 
         if edge_padding_mask is not None:
-            current_mask = edge_padding_mask
+            current_mask = edge_padding_mask.unsqueeze(-1).repeat(1, 1, 1, gaze_size).reshape(batch_size, 1, -1)  # check contiguous
         else:
             current_mask = None
         # current_mask[:, :, 0] = 1  # don't stay at current position
@@ -293,9 +318,10 @@ class QNet(nn.Module):
 
         return q_values, attention_weights
 
-    def forward(self, node_inputs, edge_inputs, current_index, node_padding_mask=None, edge_padding_mask=None,
-                edge_mask=None):
-        enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-        q_values, attention_weights = self.output_q_values(enhanced_node_feature, edge_inputs, current_index, edge_padding_mask, node_padding_mask)
+    def forward(self, node_inputs, edge_inputs, current_index, node_frontier_distribution, neighbor_gaze_candid,
+                node_padding_mask=None, edge_padding_mask=None, edge_mask=None):
+        enhanced_node_feature = self.encode_graph(node_inputs, node_frontier_distribution, node_padding_mask, edge_mask)
+        q_values, attention_weights = self.output_q_values(enhanced_node_feature, edge_inputs, current_index,
+                                                           neighbor_gaze_candid, edge_padding_mask, node_padding_mask)
         return q_values, attention_weights
 

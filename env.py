@@ -6,6 +6,7 @@ from skimage.measure import block_reduce
 from sensor import *
 from graph_generator import *
 from node import *
+from parameter import GAZE_SIZE
 
 
 class Env():
@@ -68,7 +69,7 @@ class Env():
         self.node_coords, self.graph, self.node_utility, self.guidepost, self.node_frontier_distribution = \
             self.graph_generator.generate_graph(self.start_position, self.robot_belief, self.frontiers)
 
-    def step(self, robot_position, next_position, travel_dist):
+    def step(self, robot_position, next_position, next_gaze_index, travel_dist):
         # move the robot to the selected position and update its belief
         dist = np.linalg.norm(robot_position - next_position)
         travel_dist += dist
@@ -78,7 +79,9 @@ class Env():
         # next_node_index = self.find_index_from_coords(robot_position)
         # self.graph_generator.nodes_list[next_node_index].set_visited()
         # Greedy angle selection
-        angle = self.graph_generator.find_greedy_angle(robot_position)
+        # angle = self.graph_generator.find_greedy_window(robot_position)
+        angles = self.graph_generator.find_n_greedy_window(robot_position, n=GAZE_SIZE)
+        angle = angles[next_gaze_index]
         self.graph_generator.gaze_degree.append(angle)
         self.robot_belief = self.update_robot_belief(robot_position, angle, self.sensor_range, self.robot_belief,
                                                      self.ground_truth)

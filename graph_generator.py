@@ -142,6 +142,17 @@ class Graph_generator:
         mid_degree = max_frontier_index * 10 - 175
         return mid_degree
 
+    def find_greedy_window(self, robot_position):
+        node_index = self.find_index_from_coords(self.node_coords, robot_position)
+        vector = self.node_frontier_distribution[node_index]
+        half_window_size = 4  # window = 2 * half + 1
+        window = np.concatenate((vector[-half_window_size:], vector, vector[:half_window_size]))
+        indices = np.arange(len(vector)) + half_window_size
+        sum_vector = np.sum(np.take(window, indices.reshape(-1, 1) + np.arange(-half_window_size, half_window_size + 1)), axis=1)
+        max_window_index = np.argmax(sum_vector)
+        mid_degree = max_window_index * 10 - 175
+        return mid_degree
+
     def generate_uniform_points(self):
         x = np.linspace(0, self.map_x - 1, 30).round().astype(int)
         y = np.linspace(0, self.map_y - 1, 30).round().astype(int)

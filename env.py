@@ -78,7 +78,7 @@ class Env():
         # next_node_index = self.find_index_from_coords(robot_position)
         # self.graph_generator.nodes_list[next_node_index].set_visited()
         # Greedy angle selection
-        angle = self.graph_generator.find_greedy_angle(robot_position)
+        angle = self.graph_generator.find_greedy_window(robot_position)
         self.graph_generator.gaze_degree.append(angle)
         self.robot_belief = self.update_robot_belief(robot_position, angle, self.sensor_range, self.robot_belief,
                                                      self.ground_truth)

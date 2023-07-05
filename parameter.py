@@ -5,6 +5,7 @@ INPUT_DIM = 4
 EMBEDDING_DIM = 128
 NODE_PADDING_SIZE = 360  # the number of nodes will be padded to this value
 K_SIZE = 20  # the number of neighboring nodes
+GAZE_SIZE = 3
 
 USE_GPU = False  # do you want to collect training data using GPUs
 USE_GPU_GLOBAL = True  # do you want to train the network using GPUs
